@@ -39,4 +39,17 @@ class LLMFactAnalysis(BaseModel):
     overall_llm_score: int = Field(ge=0, le=100, description="Weighted overall score based on all facts combined")
     summary_verdict: str = Field(description="One-line overall verdict, e.g. 'Strong technical profile, needs more quantified achievements'")
     
+class SkillMatch(BaseModel):
+    skill: str
+    status: Literal["matched", "missing", "partial"]
+    note: str = Field(description="Short reason, e.g. where in resume it appears, or why it's missing")
 
+
+class JobMatchAnalysis(BaseModel):
+    match_percentage: int = Field(ge=0, le=100, description="Overall semantic fit between resume and job description")
+    matched_skills: List[str]
+    missing_skills: List[str]
+    skill_details: List[SkillMatch] = Field(min_length=3, max_length=12)
+    experience_fit: Literal["Under-qualified", "Good fit", "Over-qualified"]
+    recommendations: List[str] = Field(min_length=2, max_length=5, description="Specific, actionable suggestions to improve match")
+    verdict: str = Field(description="One-line summary of overall fit")

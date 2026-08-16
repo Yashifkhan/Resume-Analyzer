@@ -1,5 +1,5 @@
 
-from Schema.pydantic_schema import ResumeData,LLMFactAnalysis
+from Schema.pydantic_schema import ResumeData,LLMFactAnalysis,JobMatchAnalysis
 import os
 import json
 from openai import OpenAI
@@ -96,11 +96,19 @@ fact_analysis_tool = {
     }
 }
 
+match_tool = {
+    "type": "function",
+    "function": {
+        "name": "generate_job_match_analysis",
+        "description": "Analyze how well a resume matches a job description",
+        "parameters": JobMatchAnalysis.model_json_schema()
+    }
+}
 
 def structure_resume(cleaned_text: str) -> ResumeData:
     response = client.chat.completions.create(
-        # model="nvidia/nemotron-3-super-120b-a12b",
-        model="meta/llama-3.1-8b-instruct",
+        model="nvidia/nemotron-3-super-120b-a12b",
+        # model="meta/llama-3.1-8b-instruct",
         messages=[{
             "role": "user",
             "content": f"""Extract resume information from the following text.
@@ -220,3 +228,76 @@ Give your improvement suggestions now."""
     )
 
     return response.choices[0].message.content
+
+
+def calculate_keyword_overlap(resume: ResumeData, job_description: str) -> dict:
+    jd_lower = job_description.lower()
+    
+    # Resume skills ko normalize karo (lowercase, extra spaces hatao)
+    resume_skills_normalized = [skill.lower().strip() for skill in resume.skills]
+
+    matched = []
+    missing_candidates = []
+
+    for skill in resume_skills_normalized:
+        # Simple substring check - skill JD text mein mention hua ya nahi
+        if skill in jd_lower:
+            matched.append(skill)
+
+    overlap_percentage = round((len(matched) / len(resume_skills_normalized)) * 100, 1) if resume_skills_normalized else 0
+
+    return {
+        "matched_count": len(matched),
+        "total_resume_skills": len(resume_skills_normalized),
+        "keyword_overlap_percentage": overlap_percentage,
+        "matched_keywords": matched
+    }
+    
+    
+def generate_llm_job_match(resume: ResumeData, job_description: str, keyword_overlap: dict) -> JobMatchAnalysis:
+    system_prompt = """You are an expert technical recruiter who evaluates how well a candidate's resume matches a given job description.
+
+Your job:
+- Compare the resume data against the job description semantically — not just exact keyword matching.
+- Recognize equivalent or related skills (e.g. "React.js" and "React" are the same; "Node.js" implies JavaScript backend experience).
+- Identify skills required by the job description that are genuinely missing from the resume.
+- Assess experience level fit — whether the candidate's years of experience and project depth match what the role expects.
+- Give specific, actionable recommendations — reference actual resume content when suggesting improvements.
+
+Rules:
+- Do not invent skills or experience not present in the resume data.
+- Be honest and realistic in match_percentage — do not inflate it to be encouraging.
+- skill_details should cover the most important skills from the job description, not every minor keyword.
+- You must respond only through the generate_job_match_analysis tool call."""
+
+    user_prompt = f"""Resume data:
+{resume.model_dump_json(indent=2)}
+
+Job description:
+{job_description}
+
+Reference — basic keyword overlap already calculated: {keyword_overlap['keyword_overlap_percentage']}% of resume skills appear literally in the job description text. Use this as a reference point, but your semantic judgment should be the primary basis for match_percentage.
+
+Generate the job match analysis now."""
+
+    response = client.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ],
+        tools=[match_tool],
+        tool_choice={"type": "function", "function": {"name": "generate_job_match_analysis"}},
+        temperature=0.3,
+        max_completion_tokens=1200
+    )
+
+    message = response.choices[0].message
+
+    if not message.tool_calls:
+        raise ValueError("Model ne tool call nahi kiya, response check karo")
+
+    tool_call = message.tool_calls[0]
+    parsed_args = json.loads(tool_call.function.arguments)
+
+    return JobMatchAnalysis(**parsed_args)

@@ -5,12 +5,17 @@ import pytesseract
 from PIL import Image
 from pypdf import PdfReader
 from Schema.pydantic_schema import ResumeData
-from bs_logic.functions import calculate_completeness_score , structure_resume,generate_qualitative_feedback,generate_llm_fact_score
+from bs_logic.functions import calculate_completeness_score , structure_resume,generate_qualitative_feedback,generate_llm_fact_score,calculate_keyword_overlap,generate_llm_job_match
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 
 # file_path="uploads/ai_ml_sample.pdf"
 file_path="uploads/yashif.png"
+job_description = """
+We are looking for a Full-Stack Developer with 1-2 years of experience in React, Node.js, and MongoDB.
+Experience with real-time systems (Socket.io) is a plus. Familiarity with cloud deployment and REST API design required.
+Bonus: exposure to AI/ML or Generative AI projects.
+"""
 
 # png or jpg to text 
 def extract_text_basic(image_path):
@@ -79,9 +84,24 @@ def analyze_resume(resume: ResumeData) -> dict:
     }
 
 # Full pipeline test
+# cleaned=check_file_path(clean_text(file_path))
+# structured = structure_resume(cleaned)   # ✅ ye ResumeData object return karta hai
+# analysis = analyze_resume(structured)
+# print(analysis)
+
+
+
+def match_resume_to_job(resume: ResumeData, job_description: str) -> dict:
+    keyword_overlap = calculate_keyword_overlap(resume, job_description)
+    llm_match = generate_llm_job_match(resume, job_description, keyword_overlap)
+
+    return {
+        "keyword_overlap": keyword_overlap,
+        "llm_match_analysis": llm_match.model_dump()
+    }
+
 cleaned=check_file_path(clean_text(file_path))
 structured = structure_resume(cleaned)   # ✅ ye ResumeData object return karta hai
-analysis = analyze_resume(structured)
-
+analysis = match_resume_to_job(structured,job_description)
 print(analysis)
-# print(json.dumps(analysis, indent=2))
+
