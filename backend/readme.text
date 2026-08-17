@@ -1,0 +1,32 @@
+GROQ MODELS
+│
+├── TEXT GENERATION / LLM
+│   │
+│   ├── openai/gpt-oss-20b
+│   ├── openai/gpt-oss-120b
+│   └── allam-2-7b
+│
+├── MULTIMODAL
+│   │
+│   └── qwen/qwen3.6-27b
+│
+├── GROQ COMPOUND
+│   │
+│   ├── groq/compound
+│   └── groq/compound-mini
+│
+├── SPEECH → TEXT
+│   │
+│   ├── whisper-large-v3
+│   └── whisper-large-v3-turbo
+│
+├── TEXT → SPEECH
+│   │
+│   ├── canopylabs/orpheus-v1-english
+│   └── canopylabs/orpheus-arabic-saudi
+│
+└── SAFETY / GUARD
+    │
+    ├── meta-llama/llama-prompt-guard-2-22m
+    ├── meta-llama/llama-prompt-guard-2-86m
+    └── openai/gpt-oss-safeguard-20b

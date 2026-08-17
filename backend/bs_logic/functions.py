@@ -1,6 +1,7 @@
 
 from Schema.pydantic_schema import ResumeData,LLMFactAnalysis,JobMatchAnalysis
 import os
+import re
 import json
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -74,7 +75,143 @@ def calculate_completeness_score(resume: ResumeData) -> dict:
         "breakdown": breakdown
     }
     
-    
+# skills matched 
+SKILL_ALIASES = {
+    # --- JS/Frontend frameworks ---
+    "react.js": "react",
+    "reactjs": "react",
+    "react native": "reactnative",
+    "vue.js": "vue",
+    "vuejs": "vue",
+    "next.js": "next",
+    "nextjs": "next",
+    "nuxt.js": "nuxt",
+    "angular.js": "angular",
+    "angularjs": "angular",
+    "svelte.js": "svelte",
+    "jquery": "jquery",
+    "tailwindcss": "tailwind",
+    "tailwind css": "tailwind",
+    "bootstrap": "bootstrap",
+    "typescript": "typescript",
+    "javascript": "javascript",
+    "es6": "javascript",
+    "js": "javascript",
+"ts": "typescript",
+
+    # --- Backend / Node ---
+    "node.js": "node",
+    "nodejs": "node",
+    "express.js": "express",
+    "expressjs": "express",
+    "nest.js": "nestjs",
+    "socket.io": "socket",
+    "graphql": "graphql",
+    "rest api": "restapi",
+    "restful api": "restapi",
+    "fastapi": "fastapi",
+    "django": "django",
+    "django rest framework": "drf",
+    "drf": "drf",
+    "flask": "flask",
+    "spring boot": "springboot",
+    "spring": "springboot",
+    ".net": "dotnet",
+    "asp.net": "dotnet",
+    "laravel": "laravel",
+
+    # --- Languages ---
+    "python": "python",
+    "python3": "python",
+    "java": "java",
+    "c++": "cpp",
+    "c#": "csharp",
+    "golang": "go",
+    "go lang": "go",
+    "php": "php",
+    "ruby": "ruby",
+    "kotlin": "kotlin",
+    "swift": "swift",
+
+    # --- Databases ---
+    "mongodb": "mongo",
+    "mongo db": "mongo",
+    "postgresql": "postgres",
+    "postgre sql": "postgres",
+    "mysql": "mysql",
+    "sqlite": "sqlite",
+    "redis": "redis",
+    "firebase": "firebase",
+    "firestore": "firebase",
+    "dynamodb": "dynamodb",
+    "elasticsearch": "elasticsearch",
+
+    # --- Cloud / DevOps ---
+    "amazon web services": "aws",
+    "aws": "aws",
+    "google cloud platform": "gcp",
+    "gcp": "gcp",
+    "microsoft azure": "azure",
+    "azure": "azure",
+    "docker": "docker",
+    "kubernetes": "kubernetes",
+    "k8s": "kubernetes",
+    "ci/cd": "cicd",
+    "ci cd": "cicd",
+    "jenkins": "jenkins",
+    "github actions": "githubactions",
+    "terraform": "terraform",
+    "nginx": "nginx",
+    "linux": "linux",
+
+    # --- ML / AI / Data (tumhare domain ke liye important) ---
+    "machine learning": "ml",
+    "ml": "ml",
+    "deep learning": "deeplearning",
+    "artificial intelligence": "ai",
+    "generative ai": "genai",
+    "gen ai": "genai",
+    "genai": "genai",
+    "large language models": "llm",
+    "llms": "llm",
+    "llm": "llm",
+    "natural language processing": "nlp",
+    "nlp": "nlp",
+    "computer vision": "cv",
+    "opencv": "cv",
+    "scikit-learn": "sklearn",
+    "scikit learn": "sklearn",
+    "sklearn": "sklearn",
+    "tensorflow": "tensorflow",
+    "pytorch": "pytorch",
+    "pandas": "pandas",
+    "numpy": "numpy",
+    "xgboost": "xgboost",
+    "langchain": "langchain",
+    "hugging face": "huggingface",
+    "huggingface": "huggingface",
+    "openai api": "openai",
+    "openai": "openai",
+    "rag": "rag",
+    "retrieval augmented generation": "rag",
+    "vector database": "vectordb",
+    "vector db": "vectordb",
+    "pinecone": "vectordb",
+    "chromadb": "vectordb",
+    "faiss": "vectordb",
+
+    # --- Version control / tools ---
+    "git": "git",
+    "github": "github",
+    "gitlab": "gitlab",
+    "postman": "postman",
+    "figma": "figma",
+    "jira": "jira",
+    "webpack": "webpack",
+    "vite": "vite",
+    "npm": "npm",
+    "yarn": "yarn",
+}
     
 # ---------- Tool Definition (OpenAI-style format) ----------
 
@@ -104,6 +241,27 @@ match_tool = {
         "parameters": JobMatchAnalysis.model_json_schema()
     }
 }
+
+    
+validation_tool = {
+    "type": "function",
+    "function": {
+        "name": "classify_document",
+        "description": "Classify whether the given document text is a resume/CV",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "is_resume": {"type": "boolean"},
+                "confidence": {"type": "number", "description": "0 to 1"},
+                "reason": {"type": "string", "description": "Short reason for the decision"},
+                "document_type_guess": {"type": "string", "description": "e.g. 'invoice', 'resume', 'article', 'blank'"}
+            },
+            "required": ["is_resume", "confidence", "reason", "document_type_guess"]
+        }
+    }
+}
+
+
 
 def structure_resume(cleaned_text: str) -> ResumeData:
     response = client.chat.completions.create(
@@ -229,26 +387,35 @@ Give your improvement suggestions now."""
 
     return response.choices[0].message.content
 
+def normalize_text(text: str) -> set:
+    text = text.lower()
+
+    # Har alias phrase ko poore text ke andar replace karo (longest phrase pehle,
+    # taaki "react native" pehle match ho "react" se pehle)
+    for phrase, canonical in sorted(SKILL_ALIASES.items(), key=lambda x: -len(x[0])):
+        pattern = r'\b' + re.escape(phrase) + r'\b'
+        text = re.sub(pattern, canonical, text)
+
+    text = re.sub(r"[^a-z0-9\s]", " ", text)  # baaki punctuation clean
+    return set(text.split())
+
 
 def calculate_keyword_overlap(resume: ResumeData, job_description: str) -> dict:
-    jd_lower = job_description.lower()
     
-    # Resume skills ko normalize karo (lowercase, extra spaces hatao)
-    resume_skills_normalized = [skill.lower().strip() for skill in resume.skills]
+    jd_tokens = normalize_text(job_description)
 
     matched = []
-    missing_candidates = []
+    for raw_skill in resume.skills:
+        skill_tokens = normalize_text(raw_skill)
+        if skill_tokens & jd_tokens:   # koi bhi common token mila to match
+            matched.append(raw_skill)
 
-    for skill in resume_skills_normalized:
-        # Simple substring check - skill JD text mein mention hua ya nahi
-        if skill in jd_lower:
-            matched.append(skill)
-
-    overlap_percentage = round((len(matched) / len(resume_skills_normalized)) * 100, 1) if resume_skills_normalized else 0
+    total = len(resume.skills)
+    overlap_percentage = round((len(matched) / total) * 100, 1) if total else 0
 
     return {
         "matched_count": len(matched),
-        "total_resume_skills": len(resume_skills_normalized),
+        "total_resume_skills": total,
         "keyword_overlap_percentage": overlap_percentage,
         "matched_keywords": matched
     }
@@ -301,3 +468,67 @@ Generate the job match analysis now."""
     parsed_args = json.loads(tool_call.function.arguments)
 
     return JobMatchAnalysis(**parsed_args)
+
+
+# add the validation function check the file is resume or not  
+RESUME_SECTION_KEYWORDS = [
+    "experience", "education", "skills", "projects",
+    "objective", "summary", "certification", "achievements",
+    "work history", "employment"
+]
+
+# mannuly check 
+def heuristic_resume_check(text: str) -> dict:
+    text_lower = text.lower()
+    word_count = len(text.split())
+
+    has_email = bool(re.search(r"[\w.+-]+@[\w-]+\.[\w.-]+", text))
+    has_phone = bool(re.search(r"(\+?\d{1,3}[-.\s]?)?\d{10}", text))
+    section_hits = sum(1 for kw in RESUME_SECTION_KEYWORDS if kw in text_lower)
+
+    # Score based scoring — tune thresholds with real test files
+    score = 0
+    if word_count >= 50: score += 1
+    if has_email: score += 1
+    if has_phone: score += 1
+    if section_hits >= 2: score += 2
+
+    return {
+        "passed": score >= 3,
+        "score": score,
+        "word_count": word_count,
+        "section_hits": section_hits
+    }
+
+# llm check 
+def llm_validate_resume(text: str) -> dict:
+    response = client.chat.completions.create(
+        model="meta/llama-3.1-8b-instruct",  # tumhara jo bhi model use ho raha hai
+        messages=[
+            {"role": "system", "content": "You are a strict document classifier. Determine if the text is from a resume/CV."},
+            {"role": "user", "content": f"Document text:\n\n{text[:3000]}"}  # truncate, poora text bhejne ki zaroorat nahi
+        ],
+        tools=[validation_tool],
+        tool_choice={"type": "function", "function": {"name": "classify_document"}}
+    )
+
+    tool_call = response.choices[0].message.tool_calls[0]
+    import json
+    return json.loads(tool_call.function.arguments)
+
+
+def validate_resume(cleaned: str) -> dict:
+    # Layer 1: heuristic pre-check (no LLM cost)
+    heuristic = heuristic_resume_check(cleaned)
+    if not heuristic["passed"]:
+        return {
+            "is_resume": False,
+            "confidence": 0.0,
+            "reason": "Missing resume signals (email/phone/sections not found)",
+            "stage": "heuristic_check"
+        }
+
+    # Layer 2: LLM semantic check (only runs if heuristic passes)
+    llm_result = llm_validate_resume(cleaned)
+    llm_result["stage"] = "llm_check"
+    return llm_result

@@ -5,17 +5,14 @@ import pytesseract
 from PIL import Image
 from pypdf import PdfReader
 from Schema.pydantic_schema import ResumeData
-from bs_logic.functions import calculate_completeness_score , structure_resume,generate_qualitative_feedback,generate_llm_fact_score,calculate_keyword_overlap,generate_llm_job_match
+from bs_logic.functions import calculate_completeness_score , structure_resume,generate_qualitative_feedback,generate_llm_fact_score,calculate_keyword_overlap,generate_llm_job_match,validate_resume
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 
 # file_path="uploads/ai_ml_sample.pdf"
+# file_path="uploads/gitrank2.png"
 file_path="uploads/yashif.png"
-job_description = """
-We are looking for a Full-Stack Developer with 1-2 years of experience in React, Node.js, and MongoDB.
-Experience with real-time systems (Socket.io) is a plus. Familiarity with cloud deployment and REST API design required.
-Bonus: exposure to AI/ML or Generative AI projects.
-"""
+job_description = "this is my resume and i want to looking the job for the gen ai development with web developemtn,main work is gen ai implement in products like saas language are know python ,js  and gen ai framwork langchain,langgraph"
 
 # png or jpg to text 
 def extract_text_basic(image_path):
@@ -100,8 +97,39 @@ def match_resume_to_job(resume: ResumeData, job_description: str) -> dict:
         "llm_match_analysis": llm_match.model_dump()
     }
 
-cleaned=check_file_path(clean_text(file_path))
-structured = structure_resume(cleaned)   # ✅ ye ResumeData object return karta hai
-analysis = match_resume_to_job(structured,job_description)
-print(analysis)
 
+
+cleaned = check_file_path(clean_text(file_path))
+
+# ---- validation layer ----
+validation = validate_resume(cleaned)
+if not validation["is_resume"] or validation.get("confidence", 0) < 0.6:
+    print(f"❌ Not a valid resume — {validation['reason']} (stage: {validation['stage']})")
+    raise ValueError(f"Invalid resume file: {validation['reason']}")
+
+def analyze_and_match(resume: ResumeData, job_description: str | None = None) -> dict:
+    # Always run — general resume quality, independent of any job
+    quality_report = analyze_resume(resume)
+
+    result = {
+        "quality": quality_report
+    }
+
+    # Run only if user provided a JD
+    if job_description:
+        job_match = match_resume_to_job(resume, job_description)
+        result["job_match"] = job_match
+
+    return result
+
+# Full pipeline of project 
+
+cleaned = check_file_path(clean_text(file_path))
+
+validation = validate_resume(cleaned)
+if not validation["is_resume"] or validation.get("confidence", 0) < 0.6:
+    raise ValueError(f"Invalid resume file: {validation['reason']}")
+
+structured = structure_resume(cleaned)
+result = analyze_and_match(structured, job_description)  # job_description optional
+print(result)
