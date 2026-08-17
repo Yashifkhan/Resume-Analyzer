@@ -389,9 +389,6 @@ Give your improvement suggestions now."""
 
 def normalize_text(text: str) -> set:
     text = text.lower()
-
-    # Har alias phrase ko poore text ke andar replace karo (longest phrase pehle,
-    # taaki "react native" pehle match ho "react" se pehle)
     for phrase, canonical in sorted(SKILL_ALIASES.items(), key=lambda x: -len(x[0])):
         pattern = r'\b' + re.escape(phrase) + r'\b'
         text = re.sub(pattern, canonical, text)

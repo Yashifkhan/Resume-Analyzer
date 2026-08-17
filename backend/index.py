@@ -97,8 +97,6 @@ def match_resume_to_job(resume: ResumeData, job_description: str) -> dict:
         "llm_match_analysis": llm_match.model_dump()
     }
 
-
-
 cleaned = check_file_path(clean_text(file_path))
 
 # ---- validation layer ----
