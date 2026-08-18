@@ -265,8 +265,8 @@ validation_tool = {
 
 def structure_resume(cleaned_text: str) -> ResumeData:
     response = client.chat.completions.create(
-        model="nvidia/nemotron-3-super-120b-a12b",
-        # model="meta/llama-3.1-8b-instruct",
+        # model="nvidia/nemotron-3-super-120b-a12b",
+        model="meta/llama-3.1-8b-instruct",
         messages=[{
             "role": "user",
             "content": f"""Extract resume information from the following text.
@@ -376,7 +376,9 @@ Weak areas: {weak_areas}
 Give your improvement suggestions now."""
 
     response = client.chat.completions.create(
-        model="nvidia/nemotron-3-super-120b-a12b",
+        # model="nvidia/nemotron-3-super-120b-a12b",
+        model="meta/llama-3.1-8b-instruct",
+        
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}

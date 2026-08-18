@@ -25,6 +25,7 @@ class ResumeData(BaseModel):
     experience: List[Experience] = Field(default_factory=list)
     education: List[Education] = Field(default_factory=list)
     summary: Optional[str] = ""
+    raw_text: str = ""
     
 
 class ResumeFact(BaseModel):
