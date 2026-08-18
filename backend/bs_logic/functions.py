@@ -374,7 +374,6 @@ Strong areas: {strong_areas}
 Weak areas: {weak_areas}
 
 Give your improvement suggestions now."""
-
     response = client.chat.completions.create(
         # model="nvidia/nemotron-3-super-120b-a12b",
         model="meta/llama-3.1-8b-instruct",

@@ -212,7 +212,7 @@ def analyze_and_match(
 
 
 # case 1
-run_resume_analysis(file_path)
+print(run_resume_analysis(file_path))
 
 # Case 2
 # run_resume_analysis(file_path, job_description=job_description)
