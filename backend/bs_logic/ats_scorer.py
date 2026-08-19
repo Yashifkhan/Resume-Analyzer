@@ -102,6 +102,7 @@ def check_keyword_match(keyword_overlap: dict) -> ATSCheckResult:
 
 
 def calculate_ats_score(resume_text: str, keyword_overlap: dict | None = None) -> ATSReport:
+    print("ats score function run ")
     has_jd = bool(keyword_overlap)
 
     checks = [

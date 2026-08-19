@@ -1,75 +1,98 @@
-
 import os
 import re
+import tempfile
+from pathlib import Path
+
 import pytesseract
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from PIL import Image
 from pypdf import PdfReader
+
 from Schema.pydantic_schema import ResumeData
-from bs_logic.functions import calculate_completeness_score , structure_resume,generate_qualitative_feedback,generate_llm_fact_score,calculate_keyword_overlap,generate_llm_job_match,validate_resume
-from bs_logic.ats_scorer import calculate_ats_score 
-pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
+from bs_logic.ats_scorer import calculate_ats_score
+from bs_logic.functions import (
+    calculate_completeness_score,
+    calculate_keyword_overlap,
+    generate_llm_fact_score,
+    generate_llm_job_match,
+    structure_resume,
+    validate_resume,
+)
 
 
-# file_path="uploads/ai_ml_sample.pdf"
-# file_path="uploads/gitrank2.png"
-file_path="uploads/yashif.png"
-# job_description = "this is my resume and i want to looking the job for the gen ai development with web developemtn,main work is gen ai implement in products like saas language are know python ,js  and gen ai framwork langchain,langgraph"
+SUPPORTED_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg"}
+DEFAULT_TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+tesseract_path = os.getenv("TESSERACT_CMD", DEFAULT_TESSERACT_PATH)
+if Path(tesseract_path).exists():
+    pytesseract.pytesseract.tesseract_cmd = tesseract_path
 
-job_description=None
-# png or jpg to text 
-def extract_text_basic(image_path):
-    img = Image.open(image_path)
-    text = pytesseract.image_to_string(img)
-    return text
+app = FastAPI(title="Resume Analyzer API", version="1.0.0")
 
-# pdf to text 
-def extract_text_pypdf(pdf_path):
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+
+class ErrorResponse(BaseModel):
+    detail: str
+
+
+class AtsScoreRequest(BaseModel):
+    resume: ResumeData
+    job_description: str | None = None
+
+
+# ---------- extraction helpers (unchanged) ----------
+
+def extract_text_basic(image_path: str) -> str:
+    with Image.open(image_path) as image:
+        return pytesseract.image_to_string(image)
+
+
+def extract_text_pypdf(pdf_path: str) -> str:
     reader = PdfReader(pdf_path)
-    full_text = ""
-    for page in reader.pages:
-        full_text += page.extract_text() + "\n"
-    return full_text
+    return "\n".join(page.extract_text() or "" for page in reader.pages)
 
-# check the file extation and sent there function 
-def check_file_path(file_path):
-    ext = os.path.splitext(file_path)[1].lower()
-    if ext in [".png", ".jpg", ".jpeg"]:
-        text = extract_text_basic(file_path)
-    elif ext == ".pdf":
-        text = extract_text_pypdf(file_path)
-    else:
-        raise ValueError(f"Unsupported file type: {ext}")
 
-    return text
+def check_file_path(file_path: str) -> str:
+    extension = Path(file_path).suffix.lower()
+    if extension in {".png", ".jpg", ".jpeg"}:
+        return extract_text_basic(file_path)
+    if extension == ".pdf":
+        return extract_text_pypdf(file_path)
+    raise ValueError(f"Unsupported file type: {extension or 'unknown'}")
 
-# clean the test 
-def clean_text(raw_text):
-    # Multiple spaces ko single space mein convert
-    text = re.sub(r' +', ' ', raw_text)
-    # Multiple blank lines ko single mein convert
-    text = re.sub(r'\n\s*\n', '\n', text)
-    # Leading/trailing whitespace hatao
-    text = text.strip()
-    return text
 
-# print(check_file_path(file_path))
-# print("clean function diff --->>")
-# print(check_file_path(clean_text(file_path)))
+def clean_text(raw_text: str) -> str:
+    text = re.sub(r" +", " ", raw_text)
+    text = re.sub(r"\n\s*\n", "\n", text)
+    return text.strip()
 
-resume_tool = {
-    "name": "extract_resume_data",
-    "description": "Extract structured information from resume text",
-    "input_schema": ResumeData.model_json_schema()
-}
 
+# ---------- core logic ----------
 
 def analyze_resume(resume: ResumeData) -> dict:
     score_report = calculate_completeness_score(resume)
     fact_analysis = generate_llm_fact_score(resume, score_report)
-
-    # Weighted combination: rule-based deterministic score + LLM qualitative judgment
     final_score = round(
-        (score_report['percentage'] * 0.4) + (fact_analysis.overall_llm_score * 0.6), 1
+        (score_report["percentage"] * 0.4)
+        + (fact_analysis.overall_llm_score * 0.6),
+        1,
     )
 
     return {
@@ -78,147 +101,132 @@ def analyze_resume(resume: ResumeData) -> dict:
         "llm_fact_analysis": {
             "facts": [fact.model_dump() for fact in fact_analysis.facts],
             "overall_llm_score": fact_analysis.overall_llm_score,
-            "summary_verdict": fact_analysis.summary_verdict
-        }
+            "summary_verdict": fact_analysis.summary_verdict,
+        },
     }
-
-# Full pipeline test
-# cleaned=check_file_path(clean_text(file_path))
-# structured = structure_resume(cleaned)   # ✅ ye ResumeData object return karta hai
-# analysis = analyze_resume(structured)
-# print(analysis)
-
 
 
 def match_resume_to_job(resume: ResumeData, job_description: str) -> dict:
     keyword_overlap = calculate_keyword_overlap(resume, job_description)
     llm_match = generate_llm_job_match(resume, job_description, keyword_overlap)
-
     return {
         "keyword_overlap": keyword_overlap,
-        "llm_match_analysis": llm_match.model_dump()
+        "llm_match_analysis": llm_match.model_dump(),
     }
 
-cleaned = check_file_path(clean_text(file_path))
 
-# ---- validation layer ----
-validation = validate_resume(cleaned)
-if not validation["is_resume"] or validation.get("confidence", 0) < 0.6:
-    print(f"❌ Not a valid resume — {validation['reason']} (stage: {validation['stage']})")
-    raise ValueError(f"Invalid resume file: {validation['reason']}")
-
-# def analyze_and_match(resume: ResumeData, job_description: str | None = None) -> dict:
-#     # Always run — general resume quality, independent of any job
-#     quality_report = analyze_resume(resume)
-
-#     result = {
-#         "quality": quality_report
-#     }
-
-#     # Run only if user provided a JD
-#     if job_description:
-#         job_match = match_resume_to_job(resume, job_description)
-#         result["job_match"] = job_match
-
-#     return result
-
-
-
-
-def analyze_and_match(resume: ResumeData,raw_text: str,  job_description: str | None = None) -> dict:
-    quality_report = analyze_resume(resume)
-
-    result = {
-        "quality": quality_report
-    }
-
+def build_ats_response(resume: ResumeData, job_description: str | None) -> dict:
     keyword_overlap = None
-    if job_description:
-        job_match = match_resume_to_job(resume, job_description)
-        result["job_match"] = job_match
-        keyword_overlap = job_match["keyword_overlap"]   # reuse, don't recompute
+    job_match = None
 
-    # ATS score always computed — full if JD present, structure-only if not
+    if job_description and job_description.strip():
+        job_match = match_resume_to_job(resume, job_description.strip())
+        keyword_overlap = job_match["keyword_overlap"]
+
     ats_report = calculate_ats_score(resume.raw_text, keyword_overlap)
-    print("ats_report",ats_report)
-    result["ats_score"] = {
-        "mode": ats_report.mode,
-        "overall_score": ats_report.overall_score,
-        "breakdown": [{"check": c.message, "score": c.score, "weight": c.weight} for c in ats_report.checks],
-        "suggestions": ats_report.suggestions,
+    response = {
+        "ats_score": {
+            "mode": ats_report.mode,
+            "overall_score": ats_report.overall_score,
+            "breakdown": [
+                {
+                    "check": check.message,
+                    "score": check.score,
+                    "weight": check.weight,
+                    "passed": check.passed,
+                }
+                for check in ats_report.checks
+            ],
+            "suggestions": ats_report.suggestions,
+        }
     }
-
-    return result
-
-
-# Full pipeline of project 
-cleaned = check_file_path(clean_text(file_path))
-
-validation = validate_resume(cleaned)
-if not validation["is_resume"] or validation.get("confidence", 0) < 0.6:
-    raise ValueError(f"Invalid resume file: {validation['reason']}")
-
-# structured = structure_resume(cleaned)
-# structured.raw_text = cleaned
-# result = analyze_and_match(structured, job_description)  # job_description optional
-# print(result)
+    if job_match:
+        response["job_match"] = job_match
+    return response
 
 
-def run_resume_analysis(
-    file_path: str,
-    job_description: str | None = None,
-    want_ats_score: bool = False,
-) -> dict:
-    cleaned = check_file_path(clean_text(file_path))
-
+def parse_and_structure(file_path: str) -> ResumeData:
+    cleaned = clean_text(check_file_path(file_path))
     validation = validate_resume(cleaned)
     if not validation["is_resume"] or validation.get("confidence", 0) < 0.6:
         raise ValueError(f"Invalid resume file: {validation['reason']}")
 
     structured = structure_resume(cleaned)
     structured.raw_text = cleaned
+    return structured
 
-    return analyze_and_match(structured, job_description, want_ats_score)
+
+# ---------- routes ----------
+
+@app.get("/health")
+def health_check() -> dict:
+    return {"status": "ok"}
 
 
-def analyze_and_match(
-    resume: ResumeData,
-    job_description: str | None,
-    want_ats_score: bool,
+@app.post(
+    "/resume-analyze",
+    responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def analyze_uploaded_resume(
+    file: UploadFile = File(...),
+    job_description: str | None = Form(default=None),
 ) -> dict:
-    # Always runs — independent of JD/ATS
-    quality_report = analyze_resume(resume)
-    result = {"quality": quality_report}
+    """
+    Case 1: file only -> quality score.
+    Case 2: file + job_description -> quality score + job_match.
+    Returns the structured `resume` back to the frontend so it can be
+    cached in state and reused later for /resume-ats-score, without
+    re-uploading the file or re-running OCR/LLM extraction.
+    """
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Upload a PDF, PNG, JPG, or JPEG file.",
+        )
 
-    keyword_overlap = None
-    if job_description:
-        job_match = match_resume_to_job(resume, job_description)
-        result["job_match"] = job_match
-        keyword_overlap = job_match["keyword_overlap"]
+    temporary_path = None
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
-    if want_ats_score:
-        ats_report = calculate_ats_score(resume.raw_text, keyword_overlap)
-        result["ats_score"] = {
-            "mode": ats_report.mode,               # "full" if keyword_overlap else "structure_only"
-            "overall_score": ats_report.overall_score,
-            "breakdown": [
-                {"check": c.message, "score": c.score, "weight": c.weight}
-                for c in ats_report.checks
-            ],
-            "suggestions": ats_report.suggestions,
-        }
+        with tempfile.NamedTemporaryFile(delete=False, suffix=extension) as temporary_file:
+            temporary_file.write(file_bytes)
+            temporary_path = temporary_file.name
 
-    return result
+        structured = parse_and_structure(temporary_path)
+
+        result = {"quality": analyze_resume(structured)}
+        if job_description and job_description.strip():
+            result["job_match"] = match_resume_to_job(structured, job_description.strip())
+
+        # send parsed resume back so the frontend can reuse it for ATS score
+        result["resume"] = structured.model_dump()
+        return result
+
+    except HTTPException:
+        raise
+    except (ValueError, OSError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    finally:
+        if temporary_path:
+            Path(temporary_path).unlink(missing_ok=True)
 
 
-# case 1
-print(run_resume_analysis(file_path))
-
-# Case 2
-# run_resume_analysis(file_path, job_description=job_description)
-
-# # Case 3
-# run_resume_analysis(file_path, want_ats_score=True)
-
-# # Case 4
-# run_resume_analysis(file_path, job_description=job_description, want_ats_score=True)
+@app.post(
+    "/resume-ats-score",
+    responses={400: {"model": ErrorResponse}, 422: {"model": ErrorResponse}},
+)
+async def get_ats_score(payload: AtsScoreRequest) -> dict:
+    """
+    Case 3: resume already analyzed -> user clicks "ATS Score" button ->
+        frontend sends back the `resume` object it got from /resume-analyze
+        (no job_description) -> returns just ats_score, no re-parsing.
+    Case 4: same, but with job_description -> returns ats_score + job_match
+        computed fresh against that job_description.
+    """
+    try:
+        return build_ats_response(payload.resume, payload.job_description)
+    except (ValueError, OSError) as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
