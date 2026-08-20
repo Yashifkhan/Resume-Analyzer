@@ -34,7 +34,7 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ORIGINS",
-        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5174,http://127.0.0.1:5173",
     ).split(",")
     if origin.strip()
 ]
@@ -160,7 +160,7 @@ def parse_and_structure(file_path: str) -> ResumeData:
 
 @app.get("/health")
 def health_check() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok","success":"resume analyzar api working"}
 
 
 @app.post(
